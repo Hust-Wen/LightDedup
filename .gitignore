@@ -1,0 +1,80 @@
+# Prerequisites
+*.d
+
+# Object files
+*.o
+*.ko
+*.obj
+*.elf
+
+# Linker output
+*.ilk
+*.map
+*.exp
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Libraries
+*.a
+*.la
+*.lo
+
+# Shared objects (inc. Windows DLLs)
+*.dll
+*.so
+*.so.*
+*.dylib
+
+# Executables
+*.exe
+*.out
+*.app
+*.i*86
+*.x86_64
+*.hex
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# Kernel Module Compile Results
+*.cmd
+.tmp_versions/
+modules.order
+Module.symvers
+Mkfile.old
+dkms.conf
+
+
+
+ioda-build.log
+ioda-femu.log
+.DS_Store
+error_backup/132MBcache-50%Dedup-100%GC-Per4MB(old20%GC)-4KBIO/Dmdedup/SSDInfo_0.log
+
+*.log
+*.sh 
+*.zip
+*.png 
+*.pdf
+*.py
+error_backup/*
+experiment/*
+images/*
+motivation/*
+old_motivation/*
+old_motivation/*
+picture-1/*
+picture-2/*
+result/*
+Size/*
+test/*
+vdbench/*
+vdbench-old/*
+src/iodaFEMU/femu-scripts/*
+wen_ReadMe
+*.json
