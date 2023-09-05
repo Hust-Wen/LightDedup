@@ -62,8 +62,9 @@ error_backup/132MBcache-50%Dedup-100%GC-Per4MB(old20%GC)-4KBIO/Dmdedup/SSDInfo_0
 *.pdf
 *.py
 *.json
-images/u20s.qcow2
+images/
 test/
 temp/
 Workloads_res*/
 vdbench/
+share/
