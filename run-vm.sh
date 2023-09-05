@@ -23,12 +23,13 @@ sleep 3
 
 MB=1
 let GB=1024*${MB}
-let device_size=16*${GB}
-device_count=4
+device_count=5
+let array_size=512*${GB}
+let device_size_per=${array_size}/${device_count}
 
 device_command=""
 for((i=1;i<=${device_count};i++));
-do device_command+="-device femu,devsz_mb=${device_size},femu_mode=1 "; done
+do device_command+="-device femu,devsz_mb=${device_size_per},femu_mode=1 "; done
 
 sudo ${IODA_FEMU} \
     -name "iodaVM" \
@@ -37,7 +38,7 @@ sudo ${IODA_FEMU} \
     -m 40G \
     -enable-kvm \
     -boot menu=on \
-    -fsdev local,security_model=passthrough,id=fsdev0,path=/home/zhaoxiaogang/share \
+    -fsdev local,security_model=passthrough,id=fsdev0,path=/home/wenyuhong/share \
     -device virtio-9p-pci,id=fs0,fsdev=fsdev0,mount_tag=hostshare \
     -drive file=${IODA_IMGDIR}/u20s.qcow2,if=virtio,cache=none,aio=native,format=qcow2 \
     ${device_command} \
@@ -55,17 +56,17 @@ echo "femu finish!"
 
 Dedup_engine="LightDedup"  #-Dmdedup -LightDedup -DedupSSD
 
-if [ $Dedup_engine == "Dmdedup" ]
-then
-GC_threshould=100    #default: 10 for Dmdedup, 10000 for LightDedup 
-elif [ $Dedup_engine == "LightDedup" ]
-then
-GC_threshould=10000    #default: 10 for Dmdedup, 10000 for LightDedup 
-R_MapTable=100       #0, 20, 50, 100, 200
-else
-GC_threshould=10000    #default: 10 for Dmdedup, 10000 for LightDedup 
-R_MapTable=0       #0, 20, 50, 100, 200
-fi
+# if [ $Dedup_engine == "Dmdedup" ]
+# then
+# GC_threshould=100    #default: 10 for Dmdedup, 10000 for LightDedup 
+# elif [ $Dedup_engine == "LightDedup" ]
+# then
+# GC_threshould=10000    #default: 10 for Dmdedup, 10000 for LightDedup 
+# R_MapTable=100       #0, 20, 50, 100, 200
+# else
+# GC_threshould=10000    #default: 10 for Dmdedup, 10000 for LightDedup 
+# R_MapTable=0       #0, 20, 50, 100, 200
+# fi
 
 # GC_threshould=5
 # R_MapTable=100
@@ -87,9 +88,9 @@ dir_name="Homes"
 # Dedup_engine=""
 
 mkdir -p "./$root_name/$dir_name/$Dedup_engine"
-cp /home/wenyuhong/git/IODA-SOSP21-AE/SSDInfo_*.log "./$root_name/$dir_name/$Dedup_engine/"
-# cp /home/wenyuhong/git/IODA-SOSP21-AE/SSDLatency_*.log ./$root_name/$dir_name/$Dedup_engine/
-cp /home/wenyuhong/git/IODA-SOSP21-AE/ioda-femu.log "./$root_name/$dir_name/$Dedup_engine/"
+cp ./SSDInfo_*.log "./$root_name/$dir_name/$Dedup_engine/"
+# cp ./SSDLatency_*.log ./$root_name/$dir_name/$Dedup_engine/
+cp ./ioda-femu.log "./$root_name/$dir_name/$Dedup_engine/"
 cp /home/wenyuhong/share/dedup_info.log "./$root_name/$dir_name/$Dedup_engine/"
 cp /home/wenyuhong/share/result_IOPS.log "./$root_name/$dir_name/$Dedup_engine/"
 # cp /home/wenyuhong/share/running_res.log ./$root_name/$dir_name/$Dedup_engine/

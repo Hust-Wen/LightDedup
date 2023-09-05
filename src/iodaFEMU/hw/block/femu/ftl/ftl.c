@@ -947,10 +947,10 @@ static void *ftl_thread(void *arg)
         usleep(100000);
     }
 
-    sprintf(ssd->info_file_name, "/home/wenyuhong/git/IODA-SOSP21-AE/SSDInfo_%d.log", ssd->id);
+    sprintf(ssd->info_file_name, "./SSDInfo_%d.log", ssd->id);
     init_file(ssd->fp_info, ssd->info_file_name);
     open_file(ssd->fp_info, ssd->info_file_name, "a");
-    // sprintf(ssd->latency_file_name, "/home/wenyuhong/git/IODA-SOSP21-AE/SSDLatency_%d.log", ssd->id);
+    // sprintf(ssd->latency_file_name, "./SSDLatency_%d.log", ssd->id);
     // init_file(ssd->fp_latency, ssd->latency_file_name);
     // open_file(ssd->fp_latency, ssd->latency_file_name, "a");
 
