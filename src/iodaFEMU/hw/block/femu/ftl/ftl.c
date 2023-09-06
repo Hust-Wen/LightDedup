@@ -10,6 +10,23 @@ uint16_t ssd_count = 0;
 
 static void *ftl_thread(void *arg);
 
+/* wen:added  Remap-SSD */
+void printf_info(struct ssd *ssd, bool force_print);     //32 Lines
+uint64_t ppa_to_OffsetInLine(struct ssd *ssd, struct ppa *ppa);  //6 Lines
+struct ppa OffsetInLine_to_ppa(struct ssd *ssd, uint64_t offset, uint64_t line_id);  //14 Lines
+struct RMM* get_RMM(struct ssd *ssd, struct line* line); //24 Lines
+struct RMM_page *get_RMM_page(struct ssd *ssd);      //6 Lines
+bool is_valid_RMM(struct ssd *ssd, struct RMM *RMM, int line_id);    //10 Lines
+void ssd_init_remote_maptbl(struct ssd *ssd, uint64_t R_MapTable_size);     //10 Lines
+void ssd_init_segments(struct ssd *ssd);    //12 Lines
+void ssd_init_write_RMM_pointer(struct ssd *ssd);   //18 Lines
+void ssd_init_GC_migration_mappins(struct ssd *ssd);     //7 Lines
+void segmentgroup_migration(struct ssd *ssd, struct line *line);    //44 Lines
+uint64_t ssd_remote_read(struct ssd *ssd, NvmeRequest *req);    //18 Lines
+uint64_t ssd_dedup_write(struct ssd *ssd, NvmeRequest *req);    //56 Lines
+uint64_t ssd_remote_parity_write(struct ssd *ssd, NvmeRequest *req);    
+uint64_t ssd_trim(struct ssd *ssd, NvmeRequest *req);   //64 Lines
+
 /* 打印调用栈的最大深度 */
 #define DUMP_STACK_DEPTH_MAX 16
 /* 打印调用栈函数 */
@@ -51,10 +68,12 @@ static inline bool should_gc_high(struct ssd *ssd)
     return (ssd->lm.free_line_cnt < ssd->sp.gc_thres_lines_high);
 }
 
-static inline struct ppa get_maptbl_ent(struct ssd *ssd, uint64_t lpn, bool if_remote_lpn)
+inline struct ppa get_maptbl_ent(struct ssd *ssd, uint64_t lpn, bool if_remote_lpn)
 {
     my_assert(ssd, lpn != RMM_PAGE, "error, there is no maptbl for RMM_PAGE\n");
-    return if_remote_lpn ? ssd->remote_maptbl[lpn % ssd->sp.tt_remote_pgs] : ssd->maptbl[lpn];
+    if(if_remote_lpn)                    return ssd->remote_maptbl[lpn];
+    else if(lpn >= ssd->sp.tt_pgs)       return ssd->remote_maptbl[lpn % ssd->sp.tt_pgs];   //remote parity
+    else                                 return ssd->maptbl[lpn];
 }
 
 static inline void set_maptbl_ent(struct ssd *ssd, uint64_t lpn, bool if_remote_lpn, struct ppa *ppa)
@@ -64,13 +83,9 @@ static inline void set_maptbl_ent(struct ssd *ssd, uint64_t lpn, bool if_remote_
     
     my_assert(ssd, lpn != INVALID_LPN, "Error, it is an INVALID_LPN in set_maptbl_ent()");
 
-    if (if_remote_lpn)
-        ssd->remote_maptbl[lpn % ssd->sp.tt_remote_pgs] = *ppa;
-    else
-    {
-        my_assert(ssd, lpn < ssd->sp.tt_pgs, "Error, lpn >= ssd->sp.tt_pgs\n");
-        ssd->maptbl[lpn] = *ppa;
-    }
+    if (if_remote_lpn)                  ssd->remote_maptbl[lpn] = *ppa;
+    else if(lpn >= ssd->sp.tt_pgs)      ssd->remote_maptbl[lpn % ssd->sp.tt_pgs] = *ppa;
+    else                                ssd->maptbl[lpn] = *ppa;
 }
 
 static uint64_t ppa2pgidx(struct ssd *ssd, struct ppa *ppa)
@@ -86,7 +101,7 @@ static uint64_t ppa2pgidx(struct ssd *ssd, struct ppa *ppa)
     return pgidx;
 }
 
-static inline struct rmap_elem get_rmap_ent(struct ssd *ssd, struct ppa *ppa)
+inline struct rmap_elem get_rmap_ent(struct ssd *ssd, struct ppa *ppa)
 {
     uint64_t pgidx = ppa2pgidx(ssd, ppa);
 
@@ -969,7 +984,7 @@ static void *ftl_thread(void *arg)
                 lat = ssd_remote_read(ssd, req);
                 break;
             case NVME_CMD_REMOTE_PARITY_WRITE:
-                // lat = ssd_remote_parity_write(ssd, req);
+                lat = ssd_remote_parity_write(ssd, req);
                 break;
             case NVME_CMD_DSM:
                 // my_log(ssd->fp_latency, "receive IO(Trim):%ld,\t", req->slba);
@@ -1180,7 +1195,7 @@ uint64_t ssd_remote_parity_write(struct ssd *ssd, NvmeRequest *req)
 {
     struct ssdparams *spp = &ssd->sp;
     struct ppa ppa;
-    uint64_t lpn = req->remote_entry_offset;
+    uint64_t lpn = spp->tt_pgs + req->remote_entry_offset;
     uint64_t curlat = 0, maxlat = 0;
     int r;
     bool is_remote = true;
@@ -1195,7 +1210,6 @@ uint64_t ssd_remote_parity_write(struct ssd *ssd, NvmeRequest *req)
 
     struct rmap_elem elem;
     elem.lpn = lpn;
-    elem.is_remote_lpn = is_remote;
     elem.RMM_page_p = NULL;
 
     ppa = get_maptbl_ent(ssd, lpn, is_remote);
