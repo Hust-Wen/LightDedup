@@ -24,8 +24,8 @@ sleep 3
 
 MB=1
 let GB=1024*${MB}
-device_count=5
-let array_size_MB=512*${GB}
+device_count=4
+let array_size_MB=64*${GB}
 let device_size_MB_per=${array_size_MB}/${device_count}
 
 device_command=""
@@ -55,7 +55,7 @@ echo "femu finish!"
 # read_ratio=0            #0, 50, 100
 # access_pattern="rand"   #seq, rand, skew
 
-Dedup_engine="Dmdedup"  #-Dmdedup -LightDedup -DedupSSD
+Dedup_engine="LightDedup"  #-Dmdedup -LightDedup -DedupSSD
 
 # if [ $Dedup_engine == "Dmdedup" ]
 # then
@@ -73,7 +73,7 @@ Dedup_engine="Dmdedup"  #-Dmdedup -LightDedup -DedupSSD
 # R_MapTable=100
 
 # root_name="vdbench"
-root_name="Workloads_res_raid5"
+root_name="Realistic_Workloads"
 # dir_name="configurations/${cache_size}cache-${duplicate_ratio}%Dedup-Per${transaction}-r${read_ratio}-${access_pattern}"
 # dir_name="R_MapTable/${duplicate_ratio}%Dedup-${R_MapTable}%R_MapTable"
 # dir_name="new_R_MapTable/${duplicate_ratio}%Dedup-${R_MapTable}%R_MapTable"

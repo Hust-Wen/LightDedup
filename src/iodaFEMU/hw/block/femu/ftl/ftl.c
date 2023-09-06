@@ -96,7 +96,8 @@ static uint64_t ppa2pgidx(struct ssd *ssd, struct ppa *ppa)
     pgidx = ppa->g.ch * spp->pgs_per_ch + ppa->g.lun * spp->pgs_per_lun +
         ppa->g.pl * spp->pgs_per_pl + ppa->g.blk * spp->pgs_per_blk + ppa->g.pg;
 
-    assert(pgidx < spp->tt_pgs);
+    my_assert(ssd, pgidx < spp->tt_pgs, "Error, pgidx(%d) is larger than spp->tt_pgs(%d), ch(%d), lun(%d), pl(%d), blk(%d), pg(%d)", 
+            pgidx, spp->tt_pgs, ppa->g.ch, ppa->g.lun, ppa->g.pl, ppa->g.blk, ppa->g.pg);
 
     return pgidx;
 }
@@ -467,7 +468,7 @@ void ssd_init(struct ssd *ssd)
             QEMU_THREAD_JOINABLE);
 }
 
-static inline bool valid_ppa(struct ssd *ssd, struct ppa *ppa)
+inline bool valid_ppa(struct ssd *ssd, struct ppa *ppa)
 {
     struct ssdparams *spp = &ssd->sp;
     int ch = ppa->g.ch;
@@ -491,7 +492,7 @@ static inline bool valid_lpn(struct ssd *ssd, uint64_t lpn)
     return (lpn < ssd->sp.tt_pgs || lpn == RMM_PAGE);
 }
 
-static inline bool mapped_ppa(struct ppa *ppa)
+inline bool mapped_ppa(struct ppa *ppa)
 {
     return !(ppa->ppa == UNMAPPED_PPA);
 }
@@ -708,19 +709,6 @@ static void mark_block_free(struct ssd *ssd, struct ppa *ppa)
         assert(pg->nsecs == spp->secs_per_pg);
         my_assert(ssd, pg->status == PG_INVALID, "Error: pg->status != PG_INVALID");
         pg->status = PG_FREE;
-        // if(pg->refcount != 0) {
-        //     my_log(ssd->fp_info, "ppa:%lu(ref=%d)(rmap-lpn=%lu),\t%s: ", ppa->ppa, pg->refcount, get_rmap_ent(ssd, ppa), "local");
-        //     for(int j=0; j<spp->tt_pgs; j++) {
-        //         if(ssd->maptbl[j].ppa == ppa->ppa)
-        //             my_log(ssd->fp_info, "LPN(%d)", j);
-        //     }
-        //     my_log(ssd->fp_info, "%s: ", "global");
-        //     for(int j=0; j<spp->tt_remote_pgs; j++) {
-        //         if(ssd->remote_maptbl[j].ppa == ppa->ppa)
-        //             my_log(ssd->fp_info, "LPN(%d)", j);
-        //     }
-        //     my_log(ssd->fp_info, "%s", "\n");
-        // }
         assert(pg->refcount == 0);
     }
 

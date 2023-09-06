@@ -13,6 +13,8 @@
 extern char cmd_output_file_name[100];
 extern struct ppa get_maptbl_ent(struct ssd *ssd, uint64_t lpn, bool if_remote_lpn);
 extern struct rmap_elem get_rmap_ent(struct ssd *ssd, struct ppa *ppa);
+extern bool mapped_ppa(struct ppa *ppa);
+extern bool valid_ppa(struct ssd *ssd, struct ppa *ppa);
 struct femu_mbe remote_parity_mbe;
 
 static void nvme_post_cqe(NvmeCQueue *cq, NvmeRequest *req)
@@ -396,24 +398,28 @@ static uint16_t nvme_new_rw(FemuCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
         req->ns = ns;
 
         struct ppa ppa = get_maptbl_ent(ssd, req->remote_entry_offset, true);
-        struct rmap_elem elem = get_rmap_ent(ssd, &ppa);
-        if(elem.lpn != INVALID_LPN && elem.lpn != RMM_PAGE) {
-            data_offset = elem.lpn << 12;
-            if (elem.lpn >= ssd->sp.tt_pgs) {
-                data_offset = (elem.lpn - ssd->sp.tt_pgs) << 12;
-                ret = femu_rw_mem_backend(ssd->remote_parity_mbe_p, &req->qsg, data_offset, false);
-            }
-            else {
+        if (mapped_ppa(&ppa) && valid_ppa(ssd, &ppa)) {
+            struct rmap_elem elem = get_rmap_ent(ssd, &ppa);
+            if(elem.lpn != INVALID_LPN && elem.lpn != RMM_PAGE) {
                 data_offset = elem.lpn << 12;
-                ret = femu_rw_mem_backend(&n->mbe, &req->qsg, data_offset, false);
+                if (elem.lpn >= ssd->sp.tt_pgs) {
+                    data_offset = (elem.lpn - ssd->sp.tt_pgs) << 12;
+                    ret = femu_rw_mem_backend(ssd->remote_parity_mbe_p, &req->qsg, data_offset, false);
+                }
+                else {
+                    data_offset = elem.lpn << 12;
+                    ret = femu_rw_mem_backend(&n->mbe, &req->qsg, data_offset, false);
+                }
+            }
+            if (!ret) {
+                return NVME_SUCCESS;
             }
         }
-        else {
-            //TODO: since FEMU stores data according to LPN instead of PPN, 
-            // while LightDedup stores data according to mapping(RemoteLPN->PPN), thus FEMU cannot read right data of PPN related to RemoteLPN
-            ret = femu_rw_mem_backend(&n->mbe, &req->qsg, data_offset, false);
-        }
-        
+
+        //TODO: since FEMU stores data according to LPN instead of PPN, 
+        // while LightDedup stores data according to mapping(RemoteLPN->PPN)
+        // thus FEMU cannot read right data of PPN related to RemoteLPN
+        ret = femu_rw_mem_backend(&n->mbe, &req->qsg, data_offset, false);
         if (!ret) {
             return NVME_SUCCESS;
         }

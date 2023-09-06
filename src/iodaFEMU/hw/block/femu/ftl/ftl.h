@@ -339,3 +339,5 @@ extern uint16_t ssd_id_cnt;
 
 struct ppa get_maptbl_ent(struct ssd *ssd, uint64_t lpn, bool if_remote_lpn);
 struct rmap_elem get_rmap_ent(struct ssd *ssd, struct ppa *ppa);
+bool mapped_ppa(struct ppa *ppa);
+bool valid_ppa(struct ssd *ssd, struct ppa *ppa);
