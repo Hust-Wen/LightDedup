@@ -276,7 +276,7 @@ enum NvmeIoCommands {
     NVME_CMD_DSM                = 0x09,
     NVME_CMD_DEDUP_WRITE        = 0x0a,
     NVME_CMD_REMOTE_READ        = 0x0e,
-    NVME_CMD_INIT_REMOTE_SPACE  = 0x0f,
+    NVME_CMD_REMOTE_PARITY_WRITE= 0x0b,
 };
 
 typedef struct NvmeDeleteQ {
@@ -776,6 +776,7 @@ typedef struct NvmeRequest {
     uint64_t                src_slba;    //for DedupWrite command
     uint32_t                remote_entry_offset;
     bool                    is_special_cmd;
+    bool                    is_raid5;
     uint32_t                special_value;
 
     /* position in the priority queue for delay emulation */

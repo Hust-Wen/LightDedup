@@ -8,8 +8,10 @@
 
 #include <immintrin.h>
 #include "nvme.h"
+#include "ftl/ftl.h"
 
 extern char cmd_output_file_name[100];
+struct femu_mbe remote_parity_mbe;
 
 static void nvme_post_cqe(NvmeCQueue *cq, NvmeRequest *req)
 {
@@ -363,7 +365,6 @@ static uint16_t nvme_new_rw(FemuCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
         uint64_t meta_size = nlb * ms;
         uint64_t elba = slba + nlb;
         uint16_t err;
-        //uint64_t simtime;
         struct ssd *ssd = &(n->ssd);
         int ret;
 
@@ -371,7 +372,6 @@ static uint16_t nvme_new_rw(FemuCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
         req->is_write = false;
 
         req->is_remote_slba = true;
-        // req->global_slba = rw->rsvd2;
         req->remote_entry_offset = rw->rsvd2;
 
         err = nvme_rw_check_req(n, ns, cmd, req, slba, elba, nlb, ctrl, data_size,
@@ -393,19 +393,28 @@ static uint16_t nvme_new_rw(FemuCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
         req->nlb = nlb;
         req->ns = ns;
 
-        //ret = femu_rw_mem_backend(&n->remote_mbe, &req->qsg, data_offset, false);
-
-        // The data read is wrong, since FEMU stores data according to LPN instead of PPN, 
-        // while LightDedup stores data according to mapping(RemoteLPN->PPN), thus FEMU cannot read right data of PPN related to RemoteLPN,
-        // Here, we just simulate the latency of RemoteRead command.
-        ret = femu_rw_mem_backend(&n->mbe, &req->qsg, data_offset, false);
+        struct ppa ppa = get_maptbl_ent(ssd, req->remote_entry_offset, true);;
+        struct rmap_elem elem = get_rmap_ent(ssd, &ppa);
+        if(elem.lpn != INVALID_LPN && elem.lpn != RMM_PAGE) {
+            data_offset = elem.lpn << 12;
+            if (elem.is_remote_lpn)
+                ret = femu_rw_mem_backend(ssd->remote_parity_mbe_p, &req->qsg, data_offset, false);
+            else 
+                ret = femu_rw_mem_backend(&n->mbe, &req->qsg, data_offset, false);
+        }
+        else {
+            //TODO: since FEMU stores data according to LPN instead of PPN, 
+            // while LightDedup stores data according to mapping(RemoteLPN->PPN), thus FEMU cannot read right data of PPN related to RemoteLPN
+            ret = femu_rw_mem_backend(&n->mbe, &req->qsg, data_offset, false);
+        }
+        
         if (!ret) {
             return NVME_SUCCESS;
         }
 
         return NVME_DNR;
     }
-    else {      //NVME_CMD_DEDUP_WRITE
+    else if(cmd->opcode == NVME_CMD_DEDUP_WRITE){      //NVME_CMD_DEDUP_WRITE
         NvmeDsmCmd *rw = (NvmeDsmCmd *)cmd;
         uint64_t slba = rw->rsvd2[1];
         const uint8_t lba_index = NVME_ID_NS_FLBAS_INDEX(ns->id_ns.flbas);
@@ -431,33 +440,68 @@ static uint16_t nvme_new_rw(FemuCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
         }
         else {
             req->src_slba = rw->rsvd2[0];
-            // req->global_slba = rw->rsvd2[1];
         }
 
-        // //rsvd12[0]: target SSD;     rsvd12[1]: default SSD;    rsvd12[2]: last SSD;
-        // req->is_remote_slba = (rw->rsvd12[0] != rw->rsvd12[1]);
-        // //rsvd2[0]: tgtLPN;     rsvd2[1]: srcLPN;
-        // req->global_slba = rw->rsvd12[1];   //TODO
-        // req->src_slba = rw->rsvd2[0];
-
         uint64_t unique_data_offset = req->src_slba << data_shift;
-        // memcpy(n->remote_mbe.mem_backend + data_offset, n->mbe.mem_backend + unique_data_offset, 4096);
-        // return NVME_SUCCESS;
-
-        // ret = femu_rw_mem_backend(&n->mbe, &req->qsg, unique_data_offset, false);   //Read duplicate data
-        // if(!ret) {
-        //     if(req->is_remote_slba) {
-        //         ret = femu_rw_mem_backend(&n->remote_mbe, &req->qsg, data_offset % n->remote_mbe.size, true);   //Write duplicate data
-        //     }
-        //     else {
-        //         ret = femu_rw_mem_backend(&n->mbe, &req->qsg, data_offset, true);
-        //     }
-        // }
 
         if (!ret) {
             return NVME_SUCCESS;
         }
         printf("Remap write error in FEMU_memory, slba=%lu, is_remote=%d\n", req->slba, req->is_remote_slba);
+        return NVME_DNR;
+    }
+    else if(cmd->opcode == NVME_CMD_REMOTE_PARITY_WRITE) {  //NVME_CMD_REMOTE_PARITY_WRITE
+        NvmeRwCmd *rw = (NvmeRwCmd *)cmd;
+        uint16_t ctrl = le16_to_cpu(rw->control);
+        uint32_t nlb  = le16_to_cpu(rw->nlb) + 1;
+        uint64_t slba = le64_to_cpu(rw->slba);
+        uint64_t prp1 = le64_to_cpu(rw->prp1);
+        uint64_t prp2 = le64_to_cpu(rw->prp2);
+        const uint8_t lba_index = NVME_ID_NS_FLBAS_INDEX(ns->id_ns.flbas);
+        const uint16_t ms = le16_to_cpu(ns->id_ns.lbaf[lba_index].ms);
+        const uint8_t data_shift = ns->id_ns.lbaf[lba_index].ds;
+        uint64_t data_size = (uint64_t)nlb << data_shift;
+        uint64_t data_offset = slba << data_shift;
+        uint64_t meta_size = nlb * ms;
+        uint64_t elba = slba + nlb;
+        uint16_t err;
+        struct ssd *ssd = &(n->ssd);
+        int ret;
+
+        req->data_offset = data_offset;
+        req->is_write = 1;
+
+        err = nvme_rw_check_req(n, ns, cmd, req, slba, elba, nlb, ctrl, data_size,
+                meta_size);
+        if (err)
+            return err;
+
+        if (nvme_map_prp(&req->qsg, &req->iov, prp1, prp2, data_size, n)) {
+            nvme_set_error_page(n, req->sq->sqid, cmd->cid, NVME_INVALID_FIELD,
+                    offsetof(NvmeRwCmd, prp1), 0, ns->id);
+            printf("error nvme_map_prp\n");
+            return NVME_INVALID_FIELD | NVME_DNR;
+        }
+
+        assert((nlb << data_shift) == req->qsg.size);
+
+        req->slba = slba;
+        req->meta_size = 0;
+        req->status = NVME_SUCCESS;
+        req->nlb = nlb;
+        req->ns = ns;
+
+        data_offset = rw->rsvd2 << 12;  //rw->rsvd2: remote_entry_offset
+
+        ret = femu_rw_mem_backend(ssd->remote_parity_mbe_p, &req->qsg, data_offset, req->is_write);
+        if (!ret) {
+            return NVME_SUCCESS;
+        }
+
+        return NVME_DNR;
+    }
+    else {
+        printf("opcode(%d) error in nvme_new_rw\n", cmd->opcode);
         return NVME_DNR;
     }
 }
@@ -518,6 +562,7 @@ static uint16_t nvme_io_cmd(FemuCtrl *n, NvmeCmd *cmd, NvmeRequest *req)
     // wen:added
     case NVME_CMD_REMOTE_READ:
     case NVME_CMD_DEDUP_WRITE:
+    case NVME_CMD_REMOTE_PARITY_WRITE:
         return nvme_new_rw(n, ns, cmd, req);
 
     case NVME_CMD_FLUSH:
@@ -1256,6 +1301,7 @@ static int femu_init(PCIDevice *pci_dev)
         ssd->ssdname = (char *)n->devname;
         printf("FEMU: starting in blackbox SSD mode ..\n");
         ssd_init(ssd);
+        ssd->remote_parity_mbe_p = &remote_parity_mbe;  //wen:added
     }
 
     printf("Coperd,femu_init done!\n");

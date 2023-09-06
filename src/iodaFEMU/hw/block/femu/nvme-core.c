@@ -502,6 +502,7 @@ uint16_t nvme_dsm(FemuCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
             
             NvmeDsmCmd *dsm_cmd = (NvmeDsmCmd *)cmd;
             req->is_special_cmd = false;
+            req->is_raid5 = false;
             if(dsm_cmd->rsvd12[0] == 0) {
                 req->is_remote_slba = false;
                 req->slba = dsm_cmd->rsvd2[0];
@@ -511,8 +512,9 @@ uint16_t nvme_dsm(FemuCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
                 req->slba = dsm_cmd->rsvd2[0];
                 req->remote_entry_offset = dsm_cmd->rsvd12[1];
             }
-            else if (dsm_cmd->rsvd12[0] == -1) {
+            else if (dsm_cmd->rsvd12[0] == -1 || dsm_cmd->rsvd12[0] == -2) {    //-1:raid0, -2:raid5
                 req->is_special_cmd = true;
+                req->is_raid5 = (dsm_cmd->rsvd12[0] == -2);
                 req->slba = slba;
                 req->special_value = dsm_cmd->rsvd12[1];
                 return NVME_SUCCESS;

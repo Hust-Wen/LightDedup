@@ -3,6 +3,7 @@
 
 #include "qemu/osdep.h"
 #include "qemu/thread.h"
+#include "../nvme.h"
 
 #define INVALID_PPA     (~(0ULL))
 #define INVALID_LPN     (~(0ULL))
@@ -255,6 +256,7 @@ struct nand_cmd {
 
 struct rmap_elem {
     uint64_t lpn;
+    bool is_remote_lpn;
     struct RMM_page* RMM_page_p;
 };
 
@@ -276,6 +278,7 @@ struct ssd {
     QemuThread ftl_thread;
 
     /* wen:added  Remap-SSD */
+    struct femu_mbe* remote_parity_mbe_p;
     uint64_t next_NVRAM_avail_time;
     uint64_t cur_write_number;
     int last_print_time_s;
@@ -335,3 +338,20 @@ extern uint16_t ssd_id_cnt;
 
 
 #endif
+
+/* wen:added  Remap-SSD */
+inline void printf_info(struct ssd *ssd, bool force_print);     //32 Lines
+inline uint64_t ppa_to_OffsetInLine(struct ssd *ssd, struct ppa *ppa);  //6 Lines
+inline struct ppa OffsetInLine_to_ppa(struct ssd *ssd, uint64_t offset, uint64_t line_id);  //14 Lines
+inline struct RMM* get_RMM(struct ssd *ssd, struct line* line); //24 Lines
+inline struct RMM_page *get_RMM_page(struct ssd *ssd);      //6 Lines
+inline bool is_valid_RMM(struct ssd *ssd, struct RMM *RMM, int line_id);    //10 Lines
+void ssd_init_remote_maptbl(struct ssd *ssd, uint64_t R_MapTable_size);     //10 Lines
+void ssd_init_segments(struct ssd *ssd);    //12 Lines
+void ssd_init_write_RMM_pointer(struct ssd *ssd);   //18 Lines
+inline void ssd_init_GC_migration_mappins(struct ssd *ssd);     //7 Lines
+void segmentgroup_migration(struct ssd *ssd, struct line *line);    //44 Lines
+uint64_t ssd_remote_read(struct ssd *ssd, NvmeRequest *req);    //18 Lines
+uint64_t ssd_dedup_write(struct ssd *ssd, NvmeRequest *req);    //56 Lines
+uint64_t ssd_remote_parity_write(struct ssd *ssd, NvmeRequest *req);    
+uint64_t ssd_trim(struct ssd *ssd, NvmeRequest *req);   //64 Lines

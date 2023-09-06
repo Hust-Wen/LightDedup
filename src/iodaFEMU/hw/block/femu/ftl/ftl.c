@@ -10,22 +10,6 @@ uint16_t ssd_count = 0;
 
 static void *ftl_thread(void *arg);
 
-/* wen:added  Remap-SSD */
-inline void printf_info(struct ssd *ssd, bool force_print);     //32 Lines
-inline uint64_t ppa_to_OffsetInLine(struct ssd *ssd, struct ppa *ppa);  //6 Lines
-inline struct ppa OffsetInLine_to_ppa(struct ssd *ssd, uint64_t offset, uint64_t line_id);  //14 Lines
-inline struct RMM* get_RMM(struct ssd *ssd, struct line* line); //24 Lines
-inline struct RMM_page *get_RMM_page(struct ssd *ssd);      //6 Lines
-inline bool is_valid_RMM(struct ssd *ssd, struct RMM *RMM, int line_id);    //10 Lines
-void ssd_init_remote_maptbl(struct ssd *ssd, uint64_t R_MapTable_size);     //10 Lines
-void ssd_init_segments(struct ssd *ssd);    //12 Lines
-void ssd_init_write_RMM_pointer(struct ssd *ssd);   //18 Lines
-inline void ssd_init_GC_migration_mappins(struct ssd *ssd);     //7 Lines
-void segmentgroup_migration(struct ssd *ssd, struct line *line);    //44 Lines
-uint64_t ssd_remote_read(struct ssd *ssd, NvmeRequest *req);    //18 Lines
-uint64_t ssd_dedup_write(struct ssd *ssd, NvmeRequest *req);    //56 Lines
-uint64_t ssd_trim(struct ssd *ssd, NvmeRequest *req);   //64 Lines
-
 /* 打印调用栈的最大深度 */
 #define DUMP_STACK_DEPTH_MAX 16
 /* 打印调用栈函数 */
@@ -984,6 +968,9 @@ static void *ftl_thread(void *arg)
                 // my_log(ssd->fp_latency, "receive IO(RemoteRead):%ld,\t", req->slba);
                 lat = ssd_remote_read(ssd, req);
                 break;
+            case NVME_CMD_REMOTE_PARITY_WRITE:
+                // lat = ssd_remote_parity_write(ssd, req);
+                break;
             case NVME_CMD_DSM:
                 // my_log(ssd->fp_latency, "receive IO(Trim):%ld,\t", req->slba);
                 lat = ssd_trim(ssd, req);
@@ -1189,6 +1176,50 @@ uint64_t ssd_dedup_write(struct ssd *ssd, NvmeRequest *req)
     return lat;
 }
 
+uint64_t ssd_remote_parity_write(struct ssd *ssd, NvmeRequest *req)
+{
+    struct ssdparams *spp = &ssd->sp;
+    struct ppa ppa;
+    uint64_t lpn = req->remote_entry_offset;
+    uint64_t curlat = 0, maxlat = 0;
+    int r;
+    bool is_remote = true;
+
+    while (should_gc_high(ssd)) {
+        /* perform GC here until !should_gc(ssd) */
+        //printf("FEMU: FTL doing blocking GC\n");
+        r = do_gc(ssd, true, NULL);
+        if (r == -1)
+            break;
+    }
+
+    struct rmap_elem elem;
+    elem.lpn = lpn;
+    elem.is_remote_lpn = is_remote;
+    elem.RMM_page_p = NULL;
+
+    ppa = get_maptbl_ent(ssd, lpn, is_remote);
+    if (mapped_ppa(&ppa)) {
+        delete_reference(ssd, is_remote, &ppa, elem);
+    }
+
+    ppa = get_new_page(ssd, false);
+    add_reference(ssd, is_remote, &ppa, false, elem);
+
+    ssd_advance_write_pointer(ssd, false);
+
+    ssd->tt_IOs[TOTAL][NAND_WRITE][USER_IO]++;
+    ssd->tt_IOs[LAST_SECOND][NAND_WRITE][USER_IO]++;
+    struct nand_cmd swr;
+    swr.cmd = NAND_WRITE;
+    swr.stime = req->stime;
+    /* get latency statistics */
+    curlat = ssd_advance_status(ssd, &ppa, &swr);
+    maxlat = (curlat > maxlat) ? curlat : maxlat;
+
+    return maxlat;
+}
+
 uint64_t ssd_trim(struct ssd *ssd, NvmeRequest *req)
 {
     if(req->is_special_cmd) {
@@ -1225,6 +1256,10 @@ uint64_t ssd_trim(struct ssd *ssd, NvmeRequest *req)
             my_log(ssd->fp_info, "%s:%lu, Offset(sector):%lu(%x), Offset(LPN):%lu(%x), special_value:%lu\n", "RemoteInit", 
                     req->global_slba, req->slba, req->slba, ssd->metadata_offset, ssd->metadata_offset, req->special_value);
             ssd_init_remote_maptbl(ssd, req->special_value);
+            if(ssd->id == 0 && req->is_raid5) {
+                uint64_t mem_size = req->special_value * 4096;
+                femu_init_mem_backend(ssd->remote_parity_mbe_p, mem_size);
+            }
             return 0;
         }
     }
