@@ -1258,7 +1258,7 @@ uint64_t ssd_trim(struct ssd *ssd, NvmeRequest *req)
             my_log(ssd->fp_info, "%s:%lu, Offset(sector):%lu(%x), Offset(LPN):%lu(%x), special_value:%lu\n", "RemoteInit", 
                     req->global_slba, req->slba, req->slba, ssd->metadata_offset, ssd->metadata_offset, req->special_value);
             ssd_init_remote_maptbl(ssd, req->special_value);
-            if(ssd->id == 0 && req->is_raid5) {
+            if(ssd->id == 0 && req->is_raid5 && req->special_value > 0) {
                 uint64_t mem_size = req->special_value * 4096;
                 femu_init_mem_backend(ssd->remote_parity_mbe_p, mem_size);
             }
