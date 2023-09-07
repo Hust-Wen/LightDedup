@@ -444,7 +444,7 @@ static uint16_t nvme_new_rw(FemuCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
         req->nlb = 8;
         req->ns = ns;
 
-        req->is_remote_slba = rw->rsvd12[0];
+        req->is_remote_slba = (rw->rsvd12[0] == 1);
         if(req->is_remote_slba) {
             req->src_slba = rw->rsvd2[0];
             req->global_slba = rw->rsvd2[1];
@@ -482,6 +482,7 @@ static uint16_t nvme_new_rw(FemuCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
 
         req->data_offset = data_offset;
         req->is_write = 1;
+        req->remote_entry_offset = rw->rsvd2;
 
         err = nvme_rw_check_req(n, ns, cmd, req, slba, elba, nlb, ctrl, data_size,
                 meta_size);

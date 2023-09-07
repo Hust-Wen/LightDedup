@@ -1186,7 +1186,7 @@ uint64_t ssd_remote_parity_write(struct ssd *ssd, NvmeRequest *req)
     uint64_t lpn = spp->tt_pgs + req->remote_entry_offset;
     uint64_t curlat = 0, maxlat = 0;
     int r;
-    bool is_remote = true;
+    bool is_remote = false;     //TODO
 
     while (should_gc_high(ssd)) {
         /* perform GC here until !should_gc(ssd) */
