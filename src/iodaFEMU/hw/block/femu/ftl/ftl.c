@@ -1338,11 +1338,11 @@ inline void add_reference(struct ssd *ssd, bool if_remote_lpn, struct ppa *ppa, 
 
     struct nand_page *pg = NULL;
     pg = get_pg(ssd, ppa);
-    my_assert(ssd, pg != NULL, "Wrong add_reference!\n");
-    my_assert(ssd, pg->refcount >= 0, "Wrong add_reference!\n");
+    my_assert(ssd, pg != NULL, "Wrong add_reference 1!\n");
+    my_assert(ssd, pg->refcount >= 0, "Wrong add_reference 2!\n");
     if(pg->refcount++ ==0) {
         mark_page_valid(ssd, ppa);
-        my_assert(ssd, get_rmap_ent(ssd, ppa).lpn == INVALID_LPN, "Wrong add_reference, there is a rmap in this ppa!\n");
+        my_assert(ssd, get_rmap_ent(ssd, ppa).lpn == INVALID_LPN, "Wrong add_reference, there is a rmap(lpn=%d, tt_pgs=%d) in this ppa!\n", get_rmap_ent(ssd, ppa).lpn, ssd->sp.tt_pgs);
         ssd->type_page_count[line->is_RMM_line ? RMMpage : if_remote_lpn ? userpage : elem.lpn >= ssd->metadata_offset ? userpage : metapage]++;
     }
 
@@ -1361,13 +1361,14 @@ inline void delete_reference(struct ssd *ssd, bool if_remote_lpn, struct ppa *pp
 
     struct nand_page *pg = NULL;
     pg = get_pg(ssd, ppa);
-    my_assert(ssd, pg != NULL, "Wrong add_reference!\n");
-    my_assert(ssd, pg->refcount > 0, "Wrong delete_reference!\n");
+    my_assert(ssd, pg != NULL, "Wrong delete_reference 1!\n");
+    my_assert(ssd, pg->refcount > 0, "Wrong delete_reference 2!\n");
     if(--pg->refcount == 0) {
         mark_page_invalid(ssd, ppa);
         ssd->type_page_count[line->is_RMM_line ? RMMpage : if_remote_lpn ? userpage : elem.lpn >= ssd->metadata_offset ? userpage : metapage]--;
     }
 
+    struct rmap_elem old_elem = get_rmap_ent(ssd, ppa); 
     if(line->is_RMM_line) {
         my_assert(ssd, elem.lpn == RMM_PAGE, "Error: it is a RMM_Line but elem.lpn != RMM_PAGE");
         my_assert(ssd, elem.RMM_page_p != NULL, "Error: it is a RMM_PAGE but elem.RMM_page_p == NULL");
@@ -1376,9 +1377,18 @@ inline void delete_reference(struct ssd *ssd, bool if_remote_lpn, struct ppa *pp
         new_elem.RMM_page_p = NULL;
         set_rmap_ent(ssd, new_elem, ppa);
     }
-    else if(!if_remote_lpn && get_rmap_ent(ssd, ppa).lpn == elem.lpn) {
+    else if(!if_remote_lpn && old_elem.lpn == elem.lpn) {
         my_assert(ssd, elem.lpn != RMM_PAGE, "Error: it is not a RMM_Line but elem.lpn == RMM_PAGE");
         my_assert(ssd, elem.lpn != INVALID_LPN, "Error: it is not a RMM_Line but elem.lpn == INVALID_LPN");
+        struct rmap_elem new_elem; 
+        new_elem.lpn = INVALID_LPN;
+        new_elem.RMM_page_p = NULL;
+        set_rmap_ent(ssd, new_elem, ppa);
+    }
+    else if(old_elem.lpn != INVALID_LPN && old_elem.lpn >= ssd->sp.tt_pgs) {        //remote parity
+        my_assert(ssd, old_elem.lpn == elem.lpn + ssd->sp.tt_pgs || old_elem.lpn == elem.lpn, 
+            "Error: ref_decrease but old_elem.lpn(%d, if_remote_lpn:%s) != elem.lpn(%d) or + tt_pgs(%d)", 
+            old_elem.lpn, if_remote_lpn ? "true" : "false", elem.lpn, ssd->sp.tt_pgs);
         struct rmap_elem new_elem; 
         new_elem.lpn = INVALID_LPN;
         new_elem.RMM_page_p = NULL;
