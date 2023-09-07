@@ -1187,6 +1187,7 @@ uint64_t ssd_remote_parity_write(struct ssd *ssd, NvmeRequest *req)
     uint64_t curlat = 0, maxlat = 0;
     int r;
     bool is_remote = false;     //TODO
+    bool is_rmap = true;        //TODO
 
     while (should_gc_high(ssd)) {
         /* perform GC here until !should_gc(ssd) */
@@ -1206,7 +1207,7 @@ uint64_t ssd_remote_parity_write(struct ssd *ssd, NvmeRequest *req)
     }
 
     ppa = get_new_page(ssd, false);
-    add_reference(ssd, is_remote, &ppa, false, elem);
+    add_reference(ssd, is_remote, &ppa, is_rmap, elem);
 
     ssd_advance_write_pointer(ssd, false);
 
