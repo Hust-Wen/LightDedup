@@ -276,18 +276,19 @@ struct ssd {
     QemuThread ftl_thread;
 
     /* wen:added  Remap-SSD */
-    struct femu_mbe* remote_parity_mbe_p;
     uint64_t next_NVRAM_avail_time;
     uint64_t cur_write_number;
     int last_print_time_s;
     struct segment_mgmt segment_management;
     struct write_pointer wp_RMM;
     struct ppa *remote_maptbl;  /* X-to-1 direct mapping table of remote LPN space */
+    struct femu_mbe remote_parity_mbe;
     struct ppa *GC_migration_mappings; //records the mapping between old_ppa and new_ppa when GC, for updating RMMs
 
     //statistics
     char info_file_name[100];
     FILE* fp_info;
+    FILE* fp_debug_info;
     char latency_file_name[100];
     FILE* fp_latency;
     uint64_t metadata_offset;
@@ -313,8 +314,22 @@ extern uint16_t ssd_id_cnt;
 
 #define init_file(fp, path) {fp = fopen(path, "w"); fclose(fp);}
 #define open_file(fp, path, type) {fp = fopen(path, type);}
-#define my_log(fp, format, ...) {fprintf(fp, format, ##__VA_ARGS__); fflush(fp);}
-
+#define my_log(fp, format, ...) { \
+    if (fp!=NULL) { \
+        fprintf(fp, format, ##__VA_ARGS__); \
+        fflush(fp); \
+    } \
+}
+#define debug_log(fp, format, ...) { \
+    if (0) { \
+        if (fp == NULL) { \
+            init_file(fp, "./SSDInfo_all.log"); \
+            open_file(fp, "./SSDInfo_all.log", "a"); \
+        } \
+        fprintf(fp, format, ##__VA_ARGS__); \
+        fflush(fp); \
+    } \
+}
 
 #define my_assert(ssd, expr, format, ...) \
 	do { \

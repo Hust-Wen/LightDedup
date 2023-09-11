@@ -15,7 +15,6 @@ extern struct ppa get_maptbl_ent(struct ssd *ssd, uint64_t lpn, bool if_remote_l
 extern struct rmap_elem get_rmap_ent(struct ssd *ssd, struct ppa *ppa);
 extern bool mapped_ppa(struct ppa *ppa);
 extern bool valid_ppa(struct ssd *ssd, struct ppa *ppa);
-struct femu_mbe remote_parity_mbe;
 
 static void nvme_post_cqe(NvmeCQueue *cq, NvmeRequest *req)
 {
@@ -300,8 +299,11 @@ static uint16_t nvme_rw(FemuCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
     uint64_t elba = slba + nlb;
     uint16_t err;
     //uint64_t simtime;
-    //struct ssd *ssd = &(n->ssd);
+    struct ssd *ssd = &(n->ssd);
     int ret;
+
+    debug_log(ssd->fp_debug_info, "id(%d) nvme_rw: is_write(%s), slba(%d), nlb(%d), data_shift(%d)\n", 
+            ssd->id, (rw->opcode == NVME_CMD_WRITE) ? "true" : "false", slba, nlb, data_shift);
 
     req->data_offset = data_offset;
     req->is_write = (rw->opcode == NVME_CMD_WRITE) ? 1 : 0;
@@ -354,7 +356,7 @@ static uint16_t nvme_rw(FemuCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
 static uint16_t nvme_new_rw(FemuCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
     NvmeRequest *req)
 {
-    if(cmd->opcode == NVME_CMD_REMOTE_READ) {   //NVME_CMD_REMOTE_READ
+    if(cmd->opcode == NVME_CMD_REMOTE_READ) {   //NVME_CMD_REMOTE_READ and remote_parity_read
         NvmeRwCmd *rw = (NvmeRwCmd *)cmd;
         uint16_t ctrl = le16_to_cpu(rw->control);
         uint32_t nlb  = le16_to_cpu(rw->nlb) + 1;
@@ -398,21 +400,24 @@ static uint16_t nvme_new_rw(FemuCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
         req->ns = ns;
 
         struct ppa ppa = get_maptbl_ent(ssd, req->remote_entry_offset, true);
+        debug_log(ssd->fp_debug_info, "id(%d) remote_read: remote_entry_offset(%d), ppa(%d), nlb(%d), data_shift(%d), ",ssd->id, req->remote_entry_offset, ppa.ppa, nlb, data_shift);
+        if (mapped_ppa(&ppa) && valid_ppa(ssd, &ppa))   debug_log(ssd->fp_debug_info, "src_lpn(%d)\n", get_rmap_ent(ssd, &ppa).lpn)
+        else                                            debug_log(ssd->fp_debug_info, "src_lpn(false)\n");
         if (mapped_ppa(&ppa) && valid_ppa(ssd, &ppa)) {
             struct rmap_elem elem = get_rmap_ent(ssd, &ppa);
             if(elem.lpn != INVALID_LPN && elem.lpn != RMM_PAGE) {
-                data_offset = elem.lpn << 12;
                 if (elem.lpn >= ssd->sp.tt_pgs) {
-                    data_offset = (elem.lpn - ssd->sp.tt_pgs) << 12;
-                    ret = femu_rw_mem_backend(ssd->remote_parity_mbe_p, &req->qsg, data_offset, false);
+                    data_offset = (elem.lpn % ssd->sp.tt_pgs) << 12;
+                    ret = femu_rw_mem_backend(&ssd->remote_parity_mbe, &req->qsg, data_offset, false);
                 }
                 else {
                     data_offset = elem.lpn << 12;
                     ret = femu_rw_mem_backend(&n->mbe, &req->qsg, data_offset, false);
                 }
-            }
-            if (!ret) {
-                return NVME_SUCCESS;
+
+                if (!ret) {
+                    return NVME_SUCCESS;
+                }
             }
         }
 
@@ -455,6 +460,8 @@ static uint16_t nvme_new_rw(FemuCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
         }
 
         uint64_t unique_data_offset = req->src_slba << data_shift;
+        debug_log(ssd->fp_debug_info, "id(%d) remap: is_remote(%s), src_slba(%d), global_slba(%d), remote_entry_offset(%d), data_shift(%d)\n", 
+            ssd->id, req->is_remote_slba ? "true" : "false", req->src_slba, req->global_slba, req->remote_entry_offset, data_shift);
 
         if (!ret) {
             return NVME_SUCCESS;
@@ -506,7 +513,9 @@ static uint16_t nvme_new_rw(FemuCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
 
         data_offset = rw->rsvd2 << 12;  //rw->rsvd2: remote_entry_offset
 
-        ret = femu_rw_mem_backend(ssd->remote_parity_mbe_p, &req->qsg, data_offset, req->is_write);
+        debug_log(ssd->fp_debug_info, "id(%d) remote_parity_write: remote_entry_offset(%d), data_shift(%d)\n", ssd->id, req->remote_entry_offset, data_shift);
+
+        ret = femu_rw_mem_backend(&ssd->remote_parity_mbe, &req->qsg, data_offset, true);
         if (!ret) {
             return NVME_SUCCESS;
         }
@@ -1314,7 +1323,15 @@ static int femu_init(PCIDevice *pci_dev)
         ssd->ssdname = (char *)n->devname;
         printf("FEMU: starting in blackbox SSD mode ..\n");
         ssd_init(ssd);
-        ssd->remote_parity_mbe_p = &remote_parity_mbe;  //wen:added
+        static struct ssd *last_ssd_p = NULL;
+        if(last_ssd_p == NULL)  {
+            last_ssd_p = ssd;
+            femu_init_mem_backend(&ssd->remote_parity_mbe, ((int64_t)ssd->sp.tt_pgs) * 4096);
+        }
+        else {
+            ssd->remote_parity_mbe.mem_backend = last_ssd_p->remote_parity_mbe.mem_backend;
+            ssd->remote_parity_mbe.size = last_ssd_p->remote_parity_mbe.size;
+        }
     }
 
     printf("Coperd,femu_init done!\n");

@@ -285,7 +285,7 @@ static void ssd_init_params(struct ssdparams *spp)
     spp->secsz = 512;
     spp->secs_per_pg = 8;
     spp->pgs_per_blk = 256;
-    spp->blks_per_pl = 320; /*Per SSD: 20GB:320  */
+    spp->blks_per_pl = 256; /*Per SSD: 20GB:320  16GB:256*/
     spp->pls_per_lun = 1;
     spp->luns_per_ch = 8;
     spp->nchs = 8;
@@ -1183,7 +1183,9 @@ uint64_t ssd_remote_parity_write(struct ssd *ssd, NvmeRequest *req)
 {
     struct ssdparams *spp = &ssd->sp;
     struct ppa ppa;
-    uint64_t lpn = spp->tt_pgs + req->remote_entry_offset;
+    uint64_t lpn = (uint64_t)spp->tt_pgs + (uint64_t)req->remote_entry_offset;
+    my_assert(ssd, req->remote_entry_offset < ssd->sp.tt_remote_pgs, 
+        "error: req->remote_entry_offset(%d) < ssd->sp.tt_remote_pgs(%d)", req->remote_entry_offset, ssd->sp.tt_remote_pgs);
     uint64_t curlat = 0, maxlat = 0;
     int r;
     bool is_remote = false;     //TODO
@@ -1259,10 +1261,6 @@ uint64_t ssd_trim(struct ssd *ssd, NvmeRequest *req)
             my_log(ssd->fp_info, "%s:%lu, Offset(sector):%lu(%x), Offset(LPN):%lu(%x), special_value:%lu\n", "RemoteInit", 
                     req->global_slba, req->slba, req->slba, ssd->metadata_offset, ssd->metadata_offset, req->special_value);
             ssd_init_remote_maptbl(ssd, req->special_value);
-            if(ssd->id == 0 && req->is_raid5 && req->special_value > 0) {
-                uint64_t mem_size = req->special_value * 4096;
-                femu_init_mem_backend(ssd->remote_parity_mbe_p, mem_size);
-            }
             return 0;
         }
     }
@@ -1362,7 +1360,7 @@ inline void delete_reference(struct ssd *ssd, bool if_remote_lpn, struct ppa *pp
     struct nand_page *pg = NULL;
     pg = get_pg(ssd, ppa);
     my_assert(ssd, pg != NULL, "Wrong delete_reference 1!\n");
-    my_assert(ssd, pg->refcount > 0, "Wrong delete_reference 2!\n");
+    my_assert(ssd, pg->refcount > 0, "Wrong delete_reference 2, ref=%d!\n", pg->refcount);
     if(--pg->refcount == 0) {
         mark_page_invalid(ssd, ppa);
         ssd->type_page_count[line->is_RMM_line ? RMMpage : if_remote_lpn ? userpage : elem.lpn >= ssd->metadata_offset ? userpage : metapage]--;
@@ -1402,6 +1400,12 @@ inline void delete_reference(struct ssd *ssd, bool if_remote_lpn, struct ppa *pp
 
     if(if_remote_lpn)
         ssd->used_R_MapTable_entris--;
+
+    if(pg->refcount == 0) {
+        my_assert(ssd, get_rmap_ent(ssd, ppa).lpn == INVALID_LPN, 
+            "Wrong delete_reference 3! old_elem.lpn(%d, if_remote_lpn:%s) != elem.lpn(%d) or + tt_pgs(%d), cur_lpn(%d), ppa(%d)", 
+            old_elem.lpn, if_remote_lpn ? "true" : "false", elem.lpn, ssd->sp.tt_pgs, get_rmap_ent(ssd, ppa).lpn, ppa->ppa);
+    }
 }
 
 inline uint64_t ppa_to_OffsetInLine(struct ssd *ssd, struct ppa *ppa)

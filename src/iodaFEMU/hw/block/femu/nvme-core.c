@@ -523,6 +523,9 @@ uint16_t nvme_dsm(FemuCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
                 printf("TRIM error in FEMU_memory, dsm_cmd->rsvd12[0]=%lu\n", dsm_cmd->rsvd12[0]);
                 return NVME_DNR;
             }
+            
+            debug_log(n->ssd.fp_debug_info, "id(%d) trim: nvme-core: is_remote(%s), slba(%d)(%d), remote_entry_offset(%d)\n",
+                n->ssd.id, req->is_remote_slba ? "true" : "false", req->slba, slba, req->remote_entry_offset);
 
             // uint32_t tgtSSD_id = ((NvmeDsmCmd *)cmd)->rsvd12[0];
             // uint32_t defaultSSD_id = ((NvmeDsmCmd *)cmd)->rsvd12[1];

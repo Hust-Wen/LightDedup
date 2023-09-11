@@ -34,7 +34,7 @@ device_command=""
 for((i=1;i<=${device_count};i++));
 do device_command+="-device femu,devsz_mb=${device_size_MB_per},femu_mode=1 "; done
 
-sudo ${IODA_FEMU} \
+sudo gdbserver localhost:2222 ${IODA_FEMU} \
     -name "iodaVM" \
     -cpu host \
     -smp 24 \
