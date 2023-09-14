@@ -58,6 +58,16 @@ void dump_trace(struct ssd* ssd) {
     return;
 }
 
+static inline unsigned long read_tsc(void) {
+    unsigned long var;
+    unsigned int hi, lo;
+
+    asm volatile ("rdtsc" : "=a" (lo), "=d" (hi));
+    var = ((unsigned long long int) hi << 32) | lo;
+
+    return var;
+}
+
 static inline bool should_gc(struct ssd *ssd)
 {
     return (ssd->lm.free_line_cnt <= ssd->sp.gc_thres_lines);
@@ -285,7 +295,7 @@ static void ssd_init_params(struct ssdparams *spp)
     spp->secsz = 512;
     spp->secs_per_pg = 8;
     spp->pgs_per_blk = 256;
-    spp->blks_per_pl = 256; /*Per SSD: 20GB:320  16GB:256*/
+    spp->blks_per_pl = 320; /*Per SSD: 20GB:320(4)  16GB:256(4+1)  13.3G:213(5+1)  11.4G:182(6+1)  8.8G:142(8+1)*/
     spp->pls_per_lun = 1;
     spp->luns_per_ch = 8;
     spp->nchs = 8;
@@ -927,6 +937,7 @@ static void *ftl_thread(void *arg)
     NvmeRequest *req = NULL;
     uint64_t lat = 0;
     int rc;
+    uint64_t cpu_cycle_begin, cpu_cycle_end;
     //unsigned int zero_in_q = 0, one_in_q = 0, two_in_q = 0, three_in_q = 0, four_or_more_in_q = 0;
     //unsigned int total_serviced = 0;
 
@@ -950,6 +961,9 @@ static void *ftl_thread(void *arg)
             printf("FEMU: FTL to_ftl dequeue failed\n");
         }
         assert(req);
+
+        cpu_cycle_begin = read_tsc();
+
         switch (req->opcode) {
             case NVME_CMD_WRITE:
                 // my_log(ssd->fp_latency, "receive IO(Write):%ld,\t", req->slba);
@@ -986,6 +1000,9 @@ static void *ftl_thread(void *arg)
 
         req->reqlat = lat;
         req->expire_time += lat;
+
+        cpu_cycle_end = read_tsc();
+        ssd->cpu_cycle_tt += (cpu_cycle_end-cpu_cycle_begin);
         
         rc = femu_ring_enqueue(ssd->to_poller, (void *)&req, 1);
         if (rc != 1) {
@@ -1243,6 +1260,7 @@ uint64_t ssd_trim(struct ssd *ssd, NvmeRequest *req)
             ssd->used_R_MapTable_entris = 0;
             ssd->valid_RMMs = 0;
             ssd->valid_RMM_pages = 0;
+            ssd->cpu_cycle_tt = 0;
             uint64_t current_time = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
             current_time = (current_time > ssd->next_ssd_avail_time ? current_time : ssd->next_ssd_avail_time);
             my_log(ssd->fp_info, "%s:%lu\n", "TestBegin", current_time/1e9);
@@ -1308,7 +1326,8 @@ inline void printf_info(struct ssd *ssd, bool force_print)
             R_MapTable_entris:%d, RMMs:%d, RMM_pages:%d, \
             TRIMs:%d(%d), \
             metadata_pages:%d(%.2fGB), user_pages:%d(%.2fGB), RMM_pages:%d(%.2fGB),\
-            RMM_pages:(malloc,%d)(free,%d)\n",
+            RMM_pages:(malloc,%d)(free,%d),\
+            cpu_cycle_tt:%ld\n",
             time_s, 
             ssd->tt_IOs[TOTAL][NAND_READ][USER_IO], ssd->tt_IOs[TOTAL][NAND_WRITE][USER_IO], ssd->tt_IOs[LAST_SECOND][NAND_READ][USER_IO], ssd->tt_IOs[LAST_SECOND][NAND_WRITE][USER_IO], ssd->tt_IOs[TOTAL][NAND_READ][METADATA_IO], ssd->tt_IOs[TOTAL][NAND_WRITE][METADATA_IO], ssd->tt_IOs[LAST_SECOND][NAND_READ][METADATA_IO], ssd->tt_IOs[LAST_SECOND][NAND_WRITE][METADATA_IO],
             ssd->tt_GC_IOs[TOTAL][NAND_READ], ssd->tt_GC_IOs[TOTAL][NAND_WRITE], ssd->tt_GC_IOs[TOTAL][NAND_ERASE], ssd->tt_GC_IOs[LAST_SECOND][NAND_READ], ssd->tt_GC_IOs[LAST_SECOND][NAND_WRITE], ssd->tt_GC_IOs[LAST_SECOND][NAND_ERASE],
@@ -1319,7 +1338,8 @@ inline void printf_info(struct ssd *ssd, bool force_print)
             ssd->type_page_count[metapage], (float)ssd->type_page_count[metapage]*4/1024/1024, 
             ssd->type_page_count[userpage], (float)ssd->type_page_count[userpage]*4/1024/1024,
             ssd->type_page_count[RMMpage], (float)ssd->type_page_count[RMMpage]*4/1024/1024,
-            ssd->g_malloc_RMM_pages, ssd->g_free_RMM_pages);
+            ssd->g_malloc_RMM_pages, ssd->g_free_RMM_pages,
+            ssd->cpu_cycle_tt);
 
         ssd->tt_IOs[LAST_SECOND][NAND_READ][USER_IO] = ssd->tt_IOs[LAST_SECOND][NAND_WRITE][USER_IO] = ssd->tt_IOs[LAST_SECOND][NAND_READ][METADATA_IO] = ssd->tt_IOs[LAST_SECOND][NAND_WRITE][METADATA_IO] = 0;
         ssd->tt_GC_IOs[LAST_SECOND][NAND_READ] = ssd->tt_GC_IOs[LAST_SECOND][NAND_WRITE] = ssd->tt_GC_IOs[LAST_SECOND][NAND_ERASE] = 0;
